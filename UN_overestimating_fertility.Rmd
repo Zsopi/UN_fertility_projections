@@ -1,0 +1,203 @@
+---
+title: "UN fertility (over?) projections"
+author: "Zsopi"
+date: "October 16, 2016"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## UN fertility projections may be too high...
+
+- This is a short project showing that the UN may be oversestimating future fertility rates in poor countries and thus also globally
+- It is based on the 2015 UN fertility projections, see here for data and decription: https://esa.un.org/unpd/wpp/Download/Standard/Population/
+
+```{r datageneration, include = FALSE}
+
+#silently getting data and preparing for analysis
+#installing necessary packages
+
+ipak <- function(pkg){
+        new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+        if (length(new.pkg)) 
+                install.packages(new.pkg, dependencies = TRUE)
+        sapply(pkg, require, character.only = TRUE)
+}
+
+packages <-c("readr","dplyr","ggplot2","xlsx","tidyr","data.table","gdata","readxl","rgdal","sp","rmarkdown","shiny")
+ipak(packages)
+
+
+#downloading data
+temp <- tempfile()
+download.file("https://esa.un.org/unpd/wpp/DVD/Files/1_Indicators%20(Standard)/ASCII_FILES/WPP2015_DB01_Period_Indicators.zip",temp)
+data_un <- read.table(unz(temp, "WPP2015_DB01_Period_Indicators.csv"),sep=",", header = T)
+unlink(temp)
+
+#generating one period ahead (future) fertility rate variable
+data_un$TFR_future<-c(data_un$TFR[-1],NA)
+
+#filling with NAs at the end of the time period for each country
+data_un$TFR_future[data_un$MidPeriod==2098]<-NA
+
+#generating forvard looking fertility rate change variable
+data_un<-data_un%>%mutate(TFR_chng=TFR_future-TFR)
+
+#regression
+
+#polynomial regression predicting change of TFR based on initial level, using time period 1985-2010
+fert_regr<-lm(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1983)%>%filter(Variant=="Medium")%>%
+                      filter(!is.na(TFR_chng))%>%
+                      filter(!is.na(TFR)),TFR_chng~poly(TFR,3))
+
+summary(fert_regr)
+
+#checking prediciton for a fertility rate of 6
+predict(fert_regr,newdata =data.frame(TFR=6))
+
+#checking prediciton for a fertility rate of 6
+predict(fert_regr,newdata =data.frame(TFR=1.55))
+
+
+#creating predicted value variable in dataframe, first with actual historical values and NAs
+data_un<-data_un%>%mutate(TFR_predicted=TFR)
+data_un$TFR_predicted[data_un$MidPeriod>2013]<-NA
+
+
+#generating new fertility predicitons based on regression
+for (i in 1:64320){
+        if (data_un$MidPeriod[i]>2008&data_un$MidPeriod[i]<2098)
+        {data_un$TFR_predicted[i+1]<-data_un$TFR_predicted[i]+predict(fert_regr,newdata =data.frame(TFR=data_un$TFR_predicted[i]))
+        
+        }}
+
+```
+
+## Two distinct fertility regimes, transition advanced (distribution of countries)
+
+```{r density chart, echo = FALSE, warning=FALSE}
+
+#density chart
+ggplot(data = data_un%>%filter(MidPeriod<=2013),aes(TFR))+
+  geom_density(aes(fill=Time, alpha = 0.1))+geom_smooth()+ scale_colour_gradientn(colours=rainbow(4))+
+  theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(x="Total fertility rate (TFR) per woman")
+
+```
+
+## Fertility change is "u" shaped function of fertility level
+
+```{r fertility level and future change1, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change 
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1983)%>%filter(TFR<=8),aes(TFR,TFR_chng, color=Time))+
+        geom_point()+geom_smooth(se=FALSE)+geom_smooth(method = lm, formula = y ~poly(x,3),color="black")+ylim(-1,0.5)+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="Initial time period")
+
+```
+
+## Recent pattern is different from long term average (Loess curves).
+
+```{r fertility level and future change2, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change, poly lines only 
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1983)%>%filter(TFR<=8),aes(TFR,TFR_chng, color=Time))+
+        geom_smooth(se=FALSE)+geom_smooth(method = lm, formula = y ~poly(x,3),color="black",se=FALSE)+ylim(-1,0.5)+annotate("text", x = 6.5, y = 0.25, label = "Fitted 3rd degree polynomial \n on 1985-2010 data")+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="Initial time period")
+
+```
+
+## ...even if we go back further in time
+
+```{r fertility level and future change3, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change, poly lines only 
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1963)%>%filter(TFR<=8),aes(TFR,TFR_chng, color=Time))+
+        geom_smooth(se=FALSE)+geom_smooth(method = lm, formula = y ~poly(x,3),color="black",se=FALSE)+ylim(-1,0.5)+annotate("text", x = 6.5, y = 0.25, label = "Fitted 3rd degree polynomial \n on 1965-2010 data")+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="Initial time period")
+
+```
+
+## If long-term pattern prevails, UN may be overestimating fertility...
+
+```{r fertility level and future change4, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change - future points and aggregate poly line only - "Medium" scenario
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1983),aes(TFR,TFR_chng, color=Time))+
+        geom_point(data = data_un%>%filter(MidPeriod>=2013&MidPeriod<2033)%>%filter(Variant=="Medium"),aes(TFR,TFR_chng, color=Time))+
+        geom_smooth(method = lm, formula = y ~poly(x,3),color="black", se=F)+annotate("text", x = 7, y = 0, label = "Fitted 3rd degree polynomial \n on 1985-2010 data")+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="UN Medium f'casts")
+
+```
+
+## ...and their "Low" variant looks more realistic
+
+```{r fertility level and future change6, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change - future points and aggregate poly line only - "Low" scenario
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>1983)%>%filter(TFR<=8),aes(TFR,TFR_chng, color=Time))+
+        geom_smooth(method = lm, formula = y ~poly(x,3),color="black", se=F)+annotate("text", x = 6.5, y = -.1, label = "Fitted 3rd degree polynomial \n on 1985-2010 data")+
+        geom_point(data = data_un%>%filter(MidPeriod>=2013&MidPeriod<2033)%>%filter(Variant=="Low"),aes(TFR,TFR_chng, color=Time))+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="UN Low f'casts")
+
+```
+
+## UN seems to project that recent (unusual) patterns will continue
+
+```{r fertility level and future change7, echo = FALSE,, warning=FALSE}
+
+#fertility level and future change - future points and aggregate poly line only - "Medium" scenario
+ggplot(data = data_un%>%filter(MidPeriod<2013&MidPeriod>2003),aes(TFR,TFR_chng, color=Time))+
+        geom_point(data = data_un%>%filter(MidPeriod>=2013&MidPeriod<2033)%>%filter(Variant=="Medium"),aes(TFR,TFR_chng, color=Time))+
+        geom_smooth(method = lm, formula = y ~poly(x,3),color="black")+annotate("text", x = 6.5, y = -.1, label = "Fitted 3rd degree polynomial \n on 2005-10 data")+
+        theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Change in TFR, 5y ahead",x="Total fertility rate (TFR) per woman",color="UN Medium f'casts")
+
+```
+
+## If long-term patterns prevail, Sub-Saharan Africa's fertility is to drop...
+
+```{r simple model and UN forecasts Sub-Saharan Africa, echo = FALSE, warning=FALSE}
+
+#generating data to plot
+line_plotdata<-data_un%>%select(Location, Variant, Time,MidPeriod, TFR, TFR_chng, TFR_predicted)%>%filter(Variant=="Medium")%>%
+        filter(MidPeriod>=1993&MidPeriod<=2033)%>%
+        filter(Location=="WORLD"|Location=="Less developed regions, excluding China"|Location=="Sub-Saharan Africa")%>%
+        rename(UN_Medium_scenario=TFR,long_term_model=TFR_predicted)%>%
+        gather(TFR_type,Fertility,-Location,-Variant,-Time,-MidPeriod,-TFR_chng)%>%mutate(new_name=paste(Location,"_",TFR_type))
+
+#sub-saharan africa fertility over time
+ggplot(line_plotdata%>%filter(Location=="Sub-Saharan Africa"),aes(MidPeriod,Fertility))+geom_line(aes(color=TFR_type),size=2)+ scale_color_manual(values=c("purple","violet"))+
+  theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Fertility",x="Time",color="Scenarios")+theme(legend.title = element_text(size=16, face="bold"),legend.text = element_text(size=14))
+
+
+```
+
+## ...and global fertility is to fall faster too
+
+```{r simple model and UN forecasts World, echo = FALSE, warning=FALSE}
+
+#World fertility over time
+ggplot(line_plotdata%>%filter(Location=="WORLD"),aes(MidPeriod,Fertility))+geom_line(aes(color=TFR_type),size=2)+ scale_color_manual(values=c("purple","violet"))+
+  theme(plot.title=element_text(size=18, face="bold"), axis.text=element_text(size=14),axis.title=element_text(size=16,face="bold"))+
+        labs(y="Fertility",x="Time",color="Scenarios")+theme(legend.title = element_text(size=16, face="bold"),legend.text = element_text(size=14))
+
+```
+
+## Conclusions: 
+
+- Based on a simple baseline of how fertility transitions usually happen, the UN may be underestimating its speed
+- This is probably because the UN is relying on recent, unusual, patterns, versus longer term ones
+- Statistically, it is better to use a larger sample to estimate if there is no reason to think the additional observations are somehow different
+- Simple "base rate" models can be powerful, and the likelyhood is that we will see downside fertility surprises, mainly in Africa
+
+
+## <br><br><br>World may reach replacement fertility in a decade...
